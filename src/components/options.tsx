@@ -1,0 +1,442 @@
+import * as React from 'react';
+import { Layout, Form, Input, InputNumber, Button, Checkbox, Radio, Select, notification, message, Row, Col } from 'antd';
+import { FormInstance } from 'antd/lib/form';
+import VideoPanel from './videoPanel';
+
+const { Content } = Layout;
+var AgoraRTC;
+const resolutions = [{
+        name: "default",
+        value: "default",
+    },
+    {
+        name: "480p",
+        value: "480p",
+    },
+    {
+        name: "720p",
+        value: "720p",
+    },
+    {
+        name: "1080p",
+        value: "1080p"
+    }
+]
+var rtc = {
+    client: null,
+    localStream: null,
+    remoteStreams: []
+}
+type Props = {
+
+};
+
+export default class extends React.Component < Props > {
+
+    state = {
+        cameraIdOptions: [],
+        microphoneIdOptions: [],
+        joined: false,
+        published: false,
+        uid: 0,
+        remoteStreams: []
+    };
+
+    formRef = React.createRef < FormInstance > ();
+
+    layout = {
+        labelCol: { span: 8 },
+        wrapperCol: { span: 16 },
+    };
+    tailLayout = {
+        wrapperCol: { offset: 8, span: 16 },
+    };
+    onFinish = values => {
+        console.log('Success:', values);
+    };
+
+    onFinishFailed = errorInfo => {
+        console.log('Failed:', errorInfo);
+    };
+    handleEvents = (_this) => {
+        // Occurs when an error message is reported and requires error handling.
+        rtc.client.on("error", (err) => {
+            console.log(err)
+        })
+        // Occurs when the peer user leaves the channel; for example, the peer user calls Client.leave.
+        rtc.client.on("peer-leave", function(evt) {
+            var id = evt.uid;
+            console.log("id", evt)
+            let streams = rtc.remoteStreams.filter(e => id !== e.getId())
+            let peerStream = rtc.remoteStreams.find(e => id === e.getId())
+            if (peerStream && peerStream.isPlaying()) {
+                peerStream.stop()
+            }
+            rtc.remoteStreams = streams
+            _this.setState({ remoteStreams: rtc.remoteStreams })
+            if (id !== _this.state.uid) {
+                // removeView(id)
+            }
+            message.success("peer leave")
+            console.log("peer-leave", id)
+        })
+        // Occurs when the local stream is published.
+        rtc.client.on("stream-published", function(evt) {
+            message.success("stream published success")
+            console.log("stream-published")
+        })
+        // Occurs when the remote stream is added.
+        rtc.client.on("stream-added", function(evt) {
+            var remoteStream = evt.stream
+            var id = remoteStream.getId()
+            message.info("stream-added uid: " + id)
+            if (id !== _this.state.uid) {
+                rtc.client.subscribe(remoteStream, function(err) {
+                    console.log("stream subscribe failed", err)
+                })
+            }
+            console.log("stream-added remote-uid: ", id)
+        })
+        // Occurs when a user subscribes to a remote stream.
+        rtc.client.on("stream-subscribed", function(evt) {
+            var remoteStream = evt.stream
+            var id = remoteStream.getId()
+            rtc.remoteStreams.push(remoteStream)
+            _this.setState({ remoteStreams: rtc.remoteStreams })
+            // addView(id)
+            setTimeout(() => remoteStream.play("remote_video_" + id), 100)
+            message.info("stream-subscribed remote-uid: " + id)
+            console.log("stream-subscribed remote-uid: ", id)
+        })
+        // Occurs when the remote stream is removed; for example, a peer user calls Client.unpublish.
+        rtc.client.on("stream-removed", function(evt) {
+            var remoteStream = evt.stream
+            var id = remoteStream.getId()
+            message.info("stream-removed uid: " + id)
+            if (remoteStream.isPlaying()) {
+                remoteStream.stop()
+            }
+            rtc.remoteStreams = rtc.remoteStreams.filter(function(stream) {
+                return stream.getId() !== id
+            })
+            _this.setState({ remoteStreams: rtc.remoteStreams })
+            // removeView(id)
+            console.log("stream-removed remote-uid: ", id)
+        })
+        rtc.client.on("onTokenPrivilegeWillExpire", function() {
+            // After requesting a new token
+            // rtc.client.renewToken(token);
+            message.info("onTokenPrivilegeWillExpire")
+            console.log("onTokenPrivilegeWillExpire")
+        })
+        rtc.client.on("onTokenPrivilegeDidExpire", function() {
+            // After requesting a new token
+            // client.renewToken(token);
+            message.info("onTokenPrivilegeDidExpire")
+            console.log("onTokenPrivilegeDidExpire")
+        })
+    }
+    join = async () => {
+        let option = this.formRef.current.getFieldsValue();
+        if (this.state.joined) {
+            message.error("Your already joined");
+            return;
+        }
+
+        rtc.client = AgoraRTC.createClient({ mode: option.mode, codec: option.codec });
+
+        try {
+            //init
+            await this.sync(rtc.client.init, option.appId);
+
+            //join
+            let uid = await this.sync(rtc.client.join, option.token, option.channel, option.uid);
+            this.setState({ uid: uid, joined: true });
+
+            // create local stream
+            rtc.localStream = AgoraRTC.createStream({
+                streamID: uid,
+                audio: true,
+                video: true,
+                screen: false,
+                microphoneId: option.microphoneId,
+                cameraId: option.cameraId
+            })
+
+            // initialize local stream. Callback function executed after intitialization is done
+            await this.sync(rtc.localStream.init);
+            rtc.localStream.play("local_stream")
+
+            // publish local stream
+            this.publish()
+        } catch (e) {
+            notification['error']({
+                message: 'client join failed ',
+                description: e,
+            });
+        }
+
+        //TODO绑定监听事件
+        this.handleEvents(this);
+
+    }
+    leave = async () => {
+        if (!rtc.client) {
+            message.error("Please Join First!")
+            return
+        }
+        if (!this.state.joined) {
+            message.error("You are not in channel")
+            return
+        }
+        /**
+         * Leaves an AgoraRTC Channel
+         * This method enables a user to leave a channel.
+         **/
+        try {
+            let uid = await this.sync(rtc.client.leave);
+            // stop stream
+            if (rtc.localStream.isPlaying()) {
+                rtc.localStream.stop()
+            }
+            // close stream
+            rtc.localStream.close()
+            for (let i = 0; i < rtc.remoteStreams.length; i++) {
+                var stream = rtc.remoteStreams.shift()
+                var id = stream.getId()
+                if (stream.isPlaying()) {
+                    stream.stop()
+                }
+                //TODO
+                // removeView(id)
+            }
+            rtc.localStream = null
+            rtc.remoteStreams = []
+            rtc.client = null
+            console.log("client leaves channel success")
+            this.setState({ joined: false, published: false })
+            message.success("leave success")
+        } catch (e) {
+            notification['error']({
+                message: 'channel leave failed ',
+                description: e,
+            });
+        }
+    }
+    publish = async () => {
+        if (!rtc.client) {
+            message.error("Please Join Room First")
+            return
+        }
+        if (this.state.published) {
+            message.error("Your already published")
+            return
+        }
+
+        try {
+            // publish localStream
+            await this.syncFail(rtc.client.publish, rtc.localStream)
+            message.success("publish success")
+            this.setState({ published: true })
+        } catch (e) {
+            notification['error']({
+                message: 'publish failed ',
+                description: e,
+            });
+        }
+    }
+    unpublish = async () => {
+        if (!rtc.client) {
+            message.error("Please Join Room First")
+            return
+        }
+        if (!this.state.published) {
+            message.error("Your didn't publish")
+            return
+        }
+
+        try {
+            // unpublish localStream
+            await this.syncFail(rtc.client.unpublish, rtc.localStream)
+            message.success("unpublish success")
+            this.setState({ published: false })
+        } catch (e) {
+            notification['error']({
+                message: 'unpublish failed ',
+                description: e,
+            });
+        }
+    }
+
+    sync = (func: Function, ...params) => {
+        return new Promise((resolve, reject) => {
+            func(...params, result => resolve(result), err => reject(err))
+        });
+    }
+
+    syncFail = (func: Function, ...params) => {
+        return new Promise((resolve, reject) => {
+            func(...params, err => reject(err))
+            resolve(1)
+        });
+    }
+
+    componentDidMount() {
+        //sdk加载方式需要优化
+        setTimeout(async () => {
+            AgoraRTC = (window as any).AgoraRTC;
+            console.log("agora sdk version: " + AgoraRTC.VERSION + " compatible: " + AgoraRTC.checkSystemRequirements());
+
+            const updateOptions = (videos, audios) => { this.setState({ cameraIdOptions: videos, microphoneIdOptions: audios }) }
+            let devices;
+            try { //获取设备及异常处理
+                devices = await this.sync(AgoraRTC.getDevices)
+            } catch (e) {
+                notification['error']({
+                    message: 'Failed to getDevice',
+                    description: e,
+                });
+            }
+
+            let videos = []
+            let audios = []
+            for (let i = 0; i < (devices as any).length; i++) {
+                let item = devices[i]
+                if ("videoinput" == item.kind) {
+                    let name = item.label
+                    let value = item.deviceId
+                    if (!name) {
+                        name = "camera-" + videos.length
+                    }
+                    videos.push({
+                        label: name,
+                        value: value,
+                        kind: item.kind
+                    })
+                }
+                if ("audioinput" == item.kind) {
+                    let name = item.label
+                    let value = item.deviceId
+                    if (!name) {
+                        name = "microphone-" + audios.length
+                    }
+                    audios.push({
+                        label: name,
+                        value: value,
+                        kind: item.kind
+                    })
+                }
+            }
+
+            updateOptions(videos, audios)
+        }, 500)
+    }
+
+    render() {
+        return (
+            <Content style={{minHeight: "100px"}}>
+              <Form
+                {...this.layout}
+                ref={this.formRef}
+                name="basic"
+                initialValues={{ remember: true }}
+                onFinish={this.onFinish}
+                onFinishFailed={this.onFinishFailed}
+              >
+                <Form.Item
+                  label="appId"
+                  name="appId"
+                  rules={[{ required: true, message: 'Please input your appID!' }]}
+                >
+                  <Input />
+                </Form.Item>
+
+                <Form.Item
+                  label="channel"
+                  name="channel"
+                  rules={[{ required: true, message: 'Please input your Channel!' }]}
+                >
+                  <Input />
+                </Form.Item>
+
+                <Form.Item
+                  label="token"
+                  name="token"
+                  rules={[{ required: true, message: 'Please input your Token!' }]}
+                >
+                  <Input />
+                </Form.Item>
+
+                <Form.Item {...this.tailLayout}>
+                <Row gutter={16}>
+                  <Button type="primary" htmlType="submit" onClick={this.join} style={{marginLeft: '8px'}}>
+                    JOIN
+                  </Button>
+                  <Button type="primary" htmlType="submit"  onClick={this.leave} style={{marginLeft: '8px'}}>
+                    LEAVE
+                  </Button>
+                  <Button type="primary" htmlType="submit"  onClick={this.publish} style={{marginLeft: '8px'}}>
+                    PUBLISH
+                  </Button>
+                  <Button type="primary" htmlType="submit"  onClick={this.unpublish} style={{marginLeft: '8px'}}>
+                    UNPUBLISH
+                  </Button>
+                  </Row>
+                </Form.Item>
+
+                <Form.Item
+                  label="uid"
+                  name="uid"
+                >
+                  <InputNumber value={this.state.uid}/>
+                </Form.Item>
+                <Form.Item
+                  label="cameraId"
+                  name="cameraId"
+                >
+                  <Select options={this.state.cameraIdOptions}/>
+                </Form.Item>
+                <Form.Item
+                  label="microphoneId"
+                  name="microphoneId"
+                >
+                  <Select options={this.state.microphoneIdOptions}/>
+                </Form.Item>
+                <Form.Item
+                  label="cameraResolution"
+                  name="cameraResolution"
+                  initialValue={resolutions[0].value}
+                >
+                  <Select options = {resolutions}/>
+                </Form.Item>
+                <Form.Item
+                  label="mode"
+                  name="mode"
+                  initialValue="rtc"
+                >
+                  <Radio.Group>
+                    <Radio value="rtc">rtc</Radio>
+                    <Radio value="live" disabled>live</Radio>
+                  </Radio.Group>
+                </Form.Item>
+                <Form.Item
+                  label="codec"
+                  name="codec"
+                  initialValue="h264"
+                >
+                  <Radio.Group>
+                    <Radio value="h264">h264</Radio>
+                    <Radio value="vp8">vp8</Radio>
+                  </Radio.Group>
+                </Form.Item>
+              </Form>
+              <div style={{display: 'flex', flexDirection: 'row', flexWrap: 'wrap' }}>
+              {this.state.joined && <VideoPanel stream={rtc.localStream} name="local_stream" />}
+              {this.state.remoteStreams.map((item) => {
+                return <VideoPanel stream={item} name={"remote_video_" + item.getId()} />
+              })}
+              </div>
+            </Content>
+        );
+    }
+}

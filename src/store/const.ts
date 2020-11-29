@@ -1,0 +1,8 @@
+export const JOIN = 'JOIN'
+export const LEAVE = 'LEAVE'
+export const PUBLISH = 'PUBLISH'
+export const UNPUBLISH = 'UNPUBLISH'
+export const MUTEVIDEO = 'MUTEVIDEO'
+export const UNMUTEVIDEO = 'UNMUTEVIDEO'
+export const MUTEAUDIO = 'MUTEAUDIO'
+export const UNMUTEAUDIO = 'UNMUTEAUDIO'
