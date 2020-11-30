@@ -1,12 +1,27 @@
-import * as React from 'react';
+import React, { Component } from 'react';
 import Options from '../components/options';
 import { Layout, Menu, Breadcrumb } from 'antd';
+import { join } from '../store/action';
 
 const { Header, Content, Footer } = Layout;
 
-export default () => {
-    return (
-        <Layout className="layout">
+type Props = {
+    store: any
+}
+export default class extends Component < Props > {
+    state = {
+        join: false
+    }
+    componentDidMount() {
+        const state = this.props.store.getState()
+        this.setState({join: state.join})
+        this.props.store.subscribe(() => {
+            this.setState({join: this.props.store.getState().join})
+        });
+    }
+    render() {
+        return (
+            <Layout className="layout">
           <Header>
             <div className="logo" />
             <Menu theme="dark" mode="horizontal" defaultSelectedKeys={['1']}>
@@ -15,11 +30,12 @@ export default () => {
           </Header>
           <Content style={{ padding: '0 50px' }}>
             <Breadcrumb style={{ margin: '16px 0' }}>
-              <Breadcrumb.Item>Demo</Breadcrumb.Item>
+              <Breadcrumb.Item>Demo({this.state.join?'已加入':'未加入'})</Breadcrumb.Item>
             </Breadcrumb>
-            <div className="site-layout-content"><Options /></div>
+            <div className="site-layout-content"><Options store={this.props.store}/></div>
           </Content>
-          <Footer style={{ textAlign: 'center' }}>Ant Design ©2018 Created by Ant UED</Footer>
         </Layout>
-    );
+        );
+    }
+
 };

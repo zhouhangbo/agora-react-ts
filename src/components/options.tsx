@@ -1,7 +1,8 @@
 import * as React from 'react';
 import { Layout, Form, Input, InputNumber, Button, Checkbox, Radio, Select, notification, message, Row, Col } from 'antd';
 import { FormInstance } from 'antd/lib/form';
-import VideoPanel from './videoPanel';
+import { VideoPanel } from './videoPanel';
+import { join, leave } from '../store/action';
 
 const { Content } = Layout;
 var AgoraRTC;
@@ -28,8 +29,8 @@ var rtc = {
     remoteStreams: []
 }
 type Props = {
-
-};
+  store: any
+}
 
 export default class extends React.Component < Props > {
 
@@ -39,7 +40,8 @@ export default class extends React.Component < Props > {
         joined: false,
         published: false,
         uid: 0,
-        remoteStreams: []
+        remoteStreams: [],
+        loading: false
     };
 
     formRef = React.createRef < FormInstance > ();
@@ -51,6 +53,7 @@ export default class extends React.Component < Props > {
     tailLayout = {
         wrapperCol: { offset: 8, span: 16 },
     };
+
     onFinish = values => {
         console.log('Success:', values);
     };
@@ -58,6 +61,165 @@ export default class extends React.Component < Props > {
     onFinishFailed = errorInfo => {
         console.log('Failed:', errorInfo);
     };
+
+    sync = (func: Function, ...params) => {
+        return new Promise((resolve, reject) => {
+            func(...params, result => resolve(result), err => reject(err))
+        });
+    }
+
+    syncFail = (func: Function, ...params) => {
+        return new Promise((resolve, reject) => {
+            func(...params, err => reject(err))
+            resolve(1)
+        });
+    }
+
+    loading() {
+        this.setState({ loading: !this.state.loading })
+    }
+
+    join = async () => {
+        this.loading()
+        let option = this.formRef.current.getFieldsValue();
+        if (this.state.joined) {
+            message.error("Your already joined");
+            return;
+        }
+
+        try { await this.formRef.current.validateFields() } catch (e) { this.loading(); return }
+
+        rtc.client = AgoraRTC.createClient({ mode: option.mode, codec: option.codec });
+
+        try {
+            //init
+            await this.sync(rtc.client.init, option.appId);
+
+            //join
+            let uid = await this.sync(rtc.client.join, option.token, option.channel, option.uid);   
+            this.formRef.current.setFieldsValue({ uid: uid });
+
+            // create local stream
+            rtc.localStream = AgoraRTC.createStream({
+                streamID: uid,
+                audio: true,
+                video: true,
+                screen: false,
+                microphoneId: option.microphoneId,
+                cameraId: option.cameraId
+            })
+            this.setState({ joined: true });
+            this.props.store.dispatch(join(null))
+
+            // initialize local stream. Callback function executed after intitialization is done
+            await this.sync(rtc.localStream.init);
+            rtc.localStream.play("local_stream")
+
+            // publish local stream
+            this.publish()
+        } catch (e) {
+            this.loading()
+            notification['error']({
+                message: 'client join failed ',
+                description: e,
+            });
+            return
+        }
+
+        //listen on event
+        this.handleEvents(this);
+        this.loading()
+    }
+    leave = async () => {
+        if (!rtc.client) {
+            message.error("Please Join First!")
+            return
+        }
+        if (!this.state.joined) {
+            message.error("You are not in channel")
+            return
+        }
+        //Leaves an AgoraRTC Channel
+        this.loading()
+        try {
+            let uid = await this.sync(rtc.client.leave);
+            // stop stream
+            if (rtc.localStream.isPlaying()) {
+                rtc.localStream.stop()
+            }
+            // close stream
+            rtc.localStream.close()
+            for (let i = 0; i < rtc.remoteStreams.length; i++) {
+                var stream = rtc.remoteStreams.shift()
+                var id = stream.getId()
+                if (stream.isPlaying()) {
+                    stream.stop()
+                }
+            }
+            rtc.localStream = null
+            rtc.remoteStreams = []
+            rtc.client = null
+            console.log("client leaves channel success")
+            this.setState({ joined: false, published: false })
+            this.props.store.dispatch(leave(null))
+            message.success("leave success")
+        } catch (e) {
+            notification['error']({
+                message: 'channel leave failed ',
+                description: e,
+            });
+        }
+        this.loading()
+    }
+    publish = async () => {
+        if (!rtc.client) {
+            message.error("Please Join Room First")
+            return
+        }
+        if (this.state.published) {
+            message.error("Your already published")
+            return
+        }
+
+        this.loading()
+        try {
+            // publish localStream
+            await this.syncFail(rtc.client.publish, rtc.localStream)
+            message.success("publish success")
+            this.setState({ published: true })
+        } catch (e) {
+            notification['error']({
+                message: 'publish failed ',
+                description: e,
+            });
+        }
+        this.loading()
+    }
+    unpublish = async () => {
+        if (!rtc.client) {
+            message.error("Please Join Room First")
+            return
+        }
+        if (!this.state.published) {
+            message.error("Your didn't publish")
+            return
+        }
+
+        this.loading()
+        try {
+            // unpublish localStream
+            await this.syncFail(rtc.client.unpublish, rtc.localStream)
+            message.success("unpublish success")
+            this.setState({ published: false })
+        } catch (e) {
+            notification['error']({
+                message: 'unpublish failed ',
+                description: e,
+            });
+        }
+        this.loading()
+    }
+
     handleEvents = (_this) => {
         // Occurs when an error message is reported and requires error handling.
         rtc.client.on("error", (err) => {
@@ -74,9 +236,6 @@ export default class extends React.Component < Props > {
             }
             rtc.remoteStreams = streams
             _this.setState({ remoteStreams: rtc.remoteStreams })
-            if (id !== _this.state.uid) {
-                // removeView(id)
-            }
             message.success("peer leave")
             console.log("peer-leave", id)
         })
@@ -90,7 +249,7 @@ export default class extends React.Component < Props > {
             var remoteStream = evt.stream
             var id = remoteStream.getId()
             message.info("stream-added uid: " + id)
-            if (id !== _this.state.uid) {
+            if (id !== _this.formRef.current.getFieldsValue("uid")) {
                 rtc.client.subscribe(remoteStream, function(err) {
                     console.log("stream subscribe failed", err)
                 })
@@ -120,7 +279,6 @@ export default class extends React.Component < Props > {
                 return stream.getId() !== id
             })
             _this.setState({ remoteStreams: rtc.remoteStreams })
-            // removeView(id)
             console.log("stream-removed remote-uid: ", id)
         })
         rtc.client.on("onTokenPrivilegeWillExpire", function() {
@@ -135,150 +293,6 @@ export default class extends React.Component < Props > {
             message.info("onTokenPrivilegeDidExpire")
             console.log("onTokenPrivilegeDidExpire")
         })
-    }
-    join = async () => {
-        let option = this.formRef.current.getFieldsValue();
-        if (this.state.joined) {
-            message.error("Your already joined");
-            return;
-        }
-
-        rtc.client = AgoraRTC.createClient({ mode: option.mode, codec: option.codec });
-
-        try {
-            //init
-            await this.sync(rtc.client.init, option.appId);
-
-            //join
-            let uid = await this.sync(rtc.client.join, option.token, option.channel, option.uid);
-            this.setState({ uid: uid, joined: true });
-
-            // create local stream
-            rtc.localStream = AgoraRTC.createStream({
-                streamID: uid,
-                audio: true,
-                video: true,
-                screen: false,
-                microphoneId: option.microphoneId,
-                cameraId: option.cameraId
-            })
-
-            // initialize local stream. Callback function executed after intitialization is done
-            await this.sync(rtc.localStream.init);
-            rtc.localStream.play("local_stream")
-
-            // publish local stream
-            this.publish()
-        } catch (e) {
-            notification['error']({
-                message: 'client join failed ',
-                description: e,
-            });
-        }
-
-        //TODO绑定监听事件
-        this.handleEvents(this);
-
-    }
-    leave = async () => {
-        if (!rtc.client) {
-            message.error("Please Join First!")
-            return
-        }
-        if (!this.state.joined) {
-            message.error("You are not in channel")
-            return
-        }
-        /**
-         * Leaves an AgoraRTC Channel
-         * This method enables a user to leave a channel.
-         **/
-        try {
-            let uid = await this.sync(rtc.client.leave);
-            // stop stream
-            if (rtc.localStream.isPlaying()) {
-                rtc.localStream.stop()
-            }
-            // close stream
-            rtc.localStream.close()
-            for (let i = 0; i < rtc.remoteStreams.length; i++) {
-                var stream = rtc.remoteStreams.shift()
-                var id = stream.getId()
-                if (stream.isPlaying()) {
-                    stream.stop()
-                }
-                //TODO
-                // removeView(id)
-            }
-            rtc.localStream = null
-            rtc.remoteStreams = []
-            rtc.client = null
-            console.log("client leaves channel success")
-            this.setState({ joined: false, published: false })
-            message.success("leave success")
-        } catch (e) {
-            notification['error']({
-                message: 'channel leave failed ',
-                description: e,
-            });
-        }
-    }
-    publish = async () => {
-        if (!rtc.client) {
-            message.error("Please Join Room First")
-            return
-        }
-        if (this.state.published) {
-            message.error("Your already published")
-            return
-        }
-
-        try {
-            // publish localStream
-            await this.syncFail(rtc.client.publish, rtc.localStream)
-            message.success("publish success")
-            this.setState({ published: true })
-        } catch (e) {
-            notification['error']({
-                message: 'publish failed ',
-                description: e,
-            });
-        }
-    }
-    unpublish = async () => {
-        if (!rtc.client) {
-            message.error("Please Join Room First")
-            return
-        }
-        if (!this.state.published) {
-            message.error("Your didn't publish")
-            return
-        }
-
-        try {
-            // unpublish localStream
-            await this.syncFail(rtc.client.unpublish, rtc.localStream)
-            message.success("unpublish success")
-            this.setState({ published: false })
-        } catch (e) {
-            notification['error']({
-                message: 'unpublish failed ',
-                description: e,
-            });
-        }
-    }
-
-    sync = (func: Function, ...params) => {
-        return new Promise((resolve, reject) => {
-            func(...params, result => resolve(result), err => reject(err))
-        });
-    }
-
-    syncFail = (func: Function, ...params) => {
-        return new Promise((resolve, reject) => {
-            func(...params, err => reject(err))
-            resolve(1)
-        });
     }
 
     componentDidMount() {
@@ -296,10 +310,12 @@ export default class extends React.Component < Props > {
                     message: 'Failed to getDevice',
                     description: e,
                 });
+                return
             }
 
-            let videos = []
-            let audios = []
+            let videos = [],
+                audios = [],
+                cameraId, microphoneId
             for (let i = 0; i < (devices as any).length; i++) {
                 let item = devices[i]
                 if ("videoinput" == item.kind) {
@@ -308,6 +324,7 @@ export default class extends React.Component < Props > {
                     if (!name) {
                         name = "camera-" + videos.length
                     }
+                    if (!cameraId) cameraId = value
                     videos.push({
                         label: name,
                         value: value,
@@ -320,6 +337,7 @@ export default class extends React.Component < Props > {
                     if (!name) {
                         name = "microphone-" + audios.length
                     }
+                    if (!microphoneId) microphoneId = value
                     audios.push({
                         label: name,
                         value: value,
@@ -329,6 +347,7 @@ export default class extends React.Component < Props > {
             }
 
             updateOptions(videos, audios)
+            this.formRef.current.setFieldsValue({ cameraId: cameraId, microphoneId: microphoneId })
         }, 500)
     }
 
@@ -369,18 +388,18 @@ export default class extends React.Component < Props > {
 
                 <Form.Item {...this.tailLayout}>
                 <Row gutter={16}>
-                  <Button type="primary" htmlType="submit" onClick={this.join} style={{marginLeft: '8px'}}>
+                  {!this.state.joined?<Button type="primary" htmlType="submit" loading={this.state.loading} onClick={this.join} style={{marginLeft: '8px'}}>
                     JOIN
-                  </Button>
-                  <Button type="primary" htmlType="submit"  onClick={this.leave} style={{marginLeft: '8px'}}>
+                  </Button>:null}
+                  {this.state.joined?<Button type="primary" htmlType="submit" loading={this.state.loading} onClick={this.leave} style={{marginLeft: '8px'}}>
                     LEAVE
-                  </Button>
-                  <Button type="primary" htmlType="submit"  onClick={this.publish} style={{marginLeft: '8px'}}>
+                  </Button>:null}
+                  {this.state.joined&&!this.state.published?<Button type="primary" htmlType="submit" loading={this.state.loading} onClick={this.publish} style={{marginLeft: '8px'}}>
                     PUBLISH
-                  </Button>
-                  <Button type="primary" htmlType="submit"  onClick={this.unpublish} style={{marginLeft: '8px'}}>
+                  </Button>:null}
+                  {this.state.joined&&this.state.published?<Button type="primary" htmlType="submit" loading={this.state.loading} onClick={this.unpublish} style={{marginLeft: '8px'}}>
                     UNPUBLISH
-                  </Button>
+                  </Button>:null}
                   </Row>
                 </Form.Item>
 
@@ -388,7 +407,7 @@ export default class extends React.Component < Props > {
                   label="uid"
                   name="uid"
                 >
-                  <InputNumber value={this.state.uid}/>
+                  <InputNumber/>
                 </Form.Item>
                 <Form.Item
                   label="cameraId"
@@ -431,9 +450,9 @@ export default class extends React.Component < Props > {
                 </Form.Item>
               </Form>
               <div style={{display: 'flex', flexDirection: 'row', flexWrap: 'wrap' }}>
-              {this.state.joined && <VideoPanel stream={rtc.localStream} name="local_stream" />}
+              {this.state.joined && <VideoPanel uid="yourself" name="local_stream" muteVideo={rtc.localStream.muteVideo} unmuteVideo={rtc.localStream.unmuteVideo} muteAudio={rtc.localStream.muteAudio} unmuteAudio={rtc.localStream.unmuteAudio} />}
               {this.state.remoteStreams.map((item) => {
-                return <VideoPanel stream={item} name={"remote_video_" + item.getId()} />
+                return <VideoPanel uid={item.getId()} name={"remote_video_" + item.getId()} muteVideo={item.muteVideo} unmuteVideo={item.unmuteVideo} muteAudio={item.muteAudio} unmuteAudio={item.unmuteAudio} />
               })}
               </div>
             </Content>

@@ -3,7 +3,6 @@ import './App.css';
 import Home from './pages/home';
 import { createStore } from "redux";
 import reducer from "./store/reducer";
-import { Provider } from "react-redux"
 
 const store = createStore(reducer)
 
@@ -15,9 +14,7 @@ class App extends Component {
         script.src = 'https://oss.dev.jiandanchina.com/common/AgoraRTCSDK.js';
         document.head.appendChild(script);
         return (
-          <Provider store={store}>
-            <Home />
-          </Provider>
+          <Home store={store}/>
         );
     }
 }

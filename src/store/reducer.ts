@@ -1,11 +1,33 @@
-const initialState = {
-  articles: [
-    { id: 1, title: "post 1", body: "Quisque cursus, metus vitae pharetra" },
-    { id: 2, title: "post 2", body: "Quisque cursus, metus vitae pharetra" },
-  ],
+import { combineReducers } from 'redux';
+import {JOIN, LEAVE, PUBLISH, UNPUBLISH, MUTEVIDEO, UNMUTEVIDEO, MUTEAUDIO, UNMUTEAUDIO} from './const'
+
+const joinReducer = (state = false, action) => {
+	const { type, payload } = action;
+	switch (type) {
+    case JOIN:
+      return true;
+    case LEAVE:
+      return false;
+    default: return state;
+	}
+}
+const publishReducer = (state = false, action) => {
+	const { type, payload } = action;
+	switch (type) {
+    case PUBLISH:
+      return Object.assign({}, state, {
+        publish: true
+      });
+    case UNPUBLISH:
+      return Object.assign({}, state, {
+        publish: false
+      });
+    default: return state;
+	}
 }
 
-const reducer = (state = initialState, action) => {
-  return state
-}
-export default reducer
+const allReducers = combineReducers({
+	join: joinReducer,
+	publish: publishReducer,
+})
+export default allReducers
