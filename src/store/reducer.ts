@@ -15,13 +15,9 @@ const publishReducer = (state = false, action) => {
 	const { type, payload } = action;
 	switch (type) {
     case PUBLISH:
-      return Object.assign({}, state, {
-        publish: true
-      });
+      return true;
     case UNPUBLISH:
-      return Object.assign({}, state, {
-        publish: false
-      });
+      return false;
     default: return state;
 	}
 }

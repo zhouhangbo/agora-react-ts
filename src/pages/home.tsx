@@ -9,14 +9,12 @@ type Props = {
     store: any
 }
 export default class extends Component < Props > {
-    state = {
-        join: false
-    }
+    state = Object.assign({}, {}, this.props.store.getState())
     componentDidMount() {
         const state = this.props.store.getState()
-        this.setState({join: state.join})
+        this.setState({ join: state.join })
         this.props.store.subscribe(() => {
-            this.setState({join: this.props.store.getState().join})
+            this.setState(this.props.store.getState())
         });
     }
     render() {
@@ -30,7 +28,7 @@ export default class extends Component < Props > {
           </Header>
           <Content style={{ padding: '0 50px' }}>
             <Breadcrumb style={{ margin: '16px 0' }}>
-              <Breadcrumb.Item>Demo({this.state.join?'已加入':'未加入'})</Breadcrumb.Item>
+              <Breadcrumb.Item>Demo({this.state.join&&this.state.publish?'已加入':'未加入'})</Breadcrumb.Item>
             </Breadcrumb>
             <div className="site-layout-content"><Options store={this.props.store}/></div>
           </Content>

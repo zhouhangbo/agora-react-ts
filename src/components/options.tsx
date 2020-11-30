@@ -2,7 +2,7 @@ import * as React from 'react';
 import { Layout, Form, Input, InputNumber, Button, Checkbox, Radio, Select, notification, message, Row, Col } from 'antd';
 import { FormInstance } from 'antd/lib/form';
 import { VideoPanel } from './videoPanel';
-import { join, leave } from '../store/action';
+import { join, leave, publish, unpublish } from '../store/action';
 
 const { Content } = Layout;
 var AgoraRTC;
@@ -187,6 +187,7 @@ export default class extends React.Component < Props > {
             await this.syncFail(rtc.client.publish, rtc.localStream)
             message.success("publish success")
             this.setState({ published: true })
+            this.props.store.dispatch(publish(null))
         } catch (e) {
             notification['error']({
                 message: 'publish failed ',
@@ -211,6 +212,7 @@ export default class extends React.Component < Props > {
             await this.syncFail(rtc.client.unpublish, rtc.localStream)
             message.success("unpublish success")
             this.setState({ published: false })
+            this.props.store.dispatch(unpublish(null))
         } catch (e) {
             notification['error']({
                 message: 'unpublish failed ',
