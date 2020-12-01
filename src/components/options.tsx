@@ -54,14 +54,6 @@ export default class extends React.Component < Props > {
         wrapperCol: { offset: 8, span: 16 },
     };
 
-    onFinish = values => {
-        console.log('Success:', values);
-    };
-
-    onFinishFailed = errorInfo => {
-        console.log('Failed:', errorInfo);
-    };
-
     sync = (func: Function, ...params) => {
         return new Promise((resolve, reject) => {
             func(...params, result => resolve(result), err => reject(err))
@@ -223,10 +215,6 @@ export default class extends React.Component < Props > {
     }
 
     handleEvents = (_this) => {
-        // Occurs when an error message is reported and requires error handling.
-        rtc.client.on("error", (err) => {
-            console.log(err)
-        })
         // Occurs when the peer user leaves the channel; for example, the peer user calls Client.leave.
         rtc.client.on("peer-leave", function(evt) {
             var id = evt.uid;
@@ -238,19 +226,14 @@ export default class extends React.Component < Props > {
             }
             rtc.remoteStreams = streams
             _this.setState({ remoteStreams: rtc.remoteStreams })
-            message.success("peer leave")
+            // message.success("uid: " + id + " leave")
             console.log("peer-leave", id)
-        })
-        // Occurs when the local stream is published.
-        rtc.client.on("stream-published", function(evt) {
-            message.success("stream published success")
-            console.log("stream-published")
         })
         // Occurs when the remote stream is added.
         rtc.client.on("stream-added", function(evt) {
             var remoteStream = evt.stream
             var id = remoteStream.getId()
-            message.info("stream-added uid: " + id)
+            // message.info("stream-added uid: " + id)
             if (id !== _this.formRef.current.getFieldsValue("uid")) {
                 rtc.client.subscribe(remoteStream, function(err) {
                     console.log("stream subscribe failed", err)
@@ -264,16 +247,15 @@ export default class extends React.Component < Props > {
             var id = remoteStream.getId()
             rtc.remoteStreams.push(remoteStream)
             _this.setState({ remoteStreams: rtc.remoteStreams })
-            // addView(id)
             setTimeout(() => remoteStream.play("remote_video_" + id), 100)
-            message.info("stream-subscribed remote-uid: " + id)
+            message.info("uid: " + id + " join")
             console.log("stream-subscribed remote-uid: ", id)
         })
         // Occurs when the remote stream is removed; for example, a peer user calls Client.unpublish.
         rtc.client.on("stream-removed", function(evt) {
             var remoteStream = evt.stream
             var id = remoteStream.getId()
-            message.info("stream-removed uid: " + id)
+            message.info("uid: " + id + " leave")
             if (remoteStream.isPlaying()) {
                 remoteStream.stop()
             }
@@ -282,18 +264,6 @@ export default class extends React.Component < Props > {
             })
             _this.setState({ remoteStreams: rtc.remoteStreams })
             console.log("stream-removed remote-uid: ", id)
-        })
-        rtc.client.on("onTokenPrivilegeWillExpire", function() {
-            // After requesting a new token
-            // rtc.client.renewToken(token);
-            message.info("onTokenPrivilegeWillExpire")
-            console.log("onTokenPrivilegeWillExpire")
-        })
-        rtc.client.on("onTokenPrivilegeDidExpire", function() {
-            // After requesting a new token
-            // client.renewToken(token);
-            message.info("onTokenPrivilegeDidExpire")
-            console.log("onTokenPrivilegeDidExpire")
         })
     }
 
@@ -361,8 +331,6 @@ export default class extends React.Component < Props > {
                 ref={this.formRef}
                 name="basic"
                 initialValues={{ remember: true }}
-                onFinish={this.onFinish}
-                onFinishFailed={this.onFinishFailed}
               >
                 <Form.Item
                   label="appId"
